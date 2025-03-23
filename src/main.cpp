@@ -8,7 +8,8 @@
 #define POT_PIN A0    // Potentiometer connected to A0
 #define BUTTON_PIN D7 // Button to enable AP mode
 #define EEPROM_INTERVAL_ADDR 0
-#define EEPROM__RELAY_ON_ADDR 0
+#define EEPROM__RELAY_ON_ADDR 1
+#define EEPROM_SIZE 4096
 
 const char *apSSID = "Relay";
 const char *apPassword = "12345678";
@@ -23,14 +24,12 @@ unsigned long MAX_RELAY_ON = 10000; // Default 10s
 
 void saveIntervalToEEPROM(unsigned long interval)
 {
-    EEPROM.begin(4);
     EEPROM.put(EEPROM_INTERVAL_ADDR, interval);
     EEPROM.commit();
 }
 
 void loadIntervalFromEEPROM()
 {
-    EEPROM.begin(4);
     EEPROM.get(EEPROM_INTERVAL_ADDR, INTERVAL);
     if (INTERVAL == 0xFFFFFFFF)
     { // Uninitialized EEPROM
@@ -41,14 +40,12 @@ void loadIntervalFromEEPROM()
 
 void saveMaxRelayOnToEEPROM(unsigned long time)
 {
-    EEPROM.begin(4);
     EEPROM.put(EEPROM__RELAY_ON_ADDR, time);
     EEPROM.commit();
 }
 
 void loadRelayOnFromEEPROM()
 {
-    EEPROM.begin(4);
     EEPROM.get(EEPROM__RELAY_ON_ADDR, MAX_RELAY_ON);
     if (MAX_RELAY_ON == 0xFFFFFFFF)
     { // Uninitialized EEPROM
@@ -105,7 +102,9 @@ void setup()
     pinMode(BUTTON_PIN, INPUT_PULLUP);
     digitalWrite(RELAY_PIN, LOW); // Ensure relay is off at start
 
+    EEPROM.begin(EEPROM_SIZE);
     loadIntervalFromEEPROM();
+    loadRelayOnFromEEPROM();
 
     WiFi.softAP(apSSID, apPassword);
     Serial.println("AP Mode Enabled");
