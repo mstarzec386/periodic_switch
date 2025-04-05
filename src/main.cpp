@@ -4,53 +4,62 @@
 #include <EEPROM.h>
 
 // Define constants
-#define RELAY_PIN D2  // Relay connected to D2
-#define POT_PIN A0    // Potentiometer connected to A0
-#define BUTTON_PIN D7 // Button to enable AP mode
+#define RELAY_PIN D2
+#define POT_PIN A0
+#define BUTTON_PIN D7
 #define EEPROM_INTERVAL_ADDR 0
-#define EEPROM__RELAY_ON_ADDR 1
+#define EEPROM_RELAY_ON_ADDR sizeof(unsigned long)
 #define EEPROM_SIZE 4096
 
 const char *apSSID = "Relay";
 const char *apPassword = "12345678";
 ESP8266WebServer server(80);
 
-unsigned long previousMillis = 0;
 bool relayOn = false;
+bool relayOnButton = false;
 unsigned long relayOnTime = 0;
 unsigned long relayStartMillis = 0;
-unsigned long INTERVAL = 28800000;  // Default 8 hours
-unsigned long MAX_RELAY_ON = 10000; // Default 10s
+unsigned long intervalMs = 28800000;
+unsigned long relayOnMs = 12000;
 
-void saveIntervalToEEPROM(unsigned long interval)
+void clearEEPROM()
 {
-    EEPROM.put(EEPROM_INTERVAL_ADDR, interval);
+    for (int i = 0; i < EEPROM_SIZE; i++)
+    {
+        EEPROM.write(i, 0xFF);
+    }
+    EEPROM.commit();
+}
+
+void saveIntervalToEEPROM()
+{
+    EEPROM.put(EEPROM_INTERVAL_ADDR, intervalMs);
     EEPROM.commit();
 }
 
 void loadIntervalFromEEPROM()
 {
-    EEPROM.get(EEPROM_INTERVAL_ADDR, INTERVAL);
-    if (INTERVAL == 0xFFFFFFFF)
-    { // Uninitialized EEPROM
-        INTERVAL = 28800000;
-        saveIntervalToEEPROM(INTERVAL);
+    EEPROM.get(EEPROM_INTERVAL_ADDR, intervalMs);
+    if (intervalMs == 0xFFFFFFFF)
+    {
+        intervalMs = 28800000;
+        saveIntervalToEEPROM();
     }
 }
 
-void saveMaxRelayOnToEEPROM(unsigned long time)
+void saveRelayOnToEEPROM()
 {
-    EEPROM.put(EEPROM__RELAY_ON_ADDR, time);
+    EEPROM.put(EEPROM_RELAY_ON_ADDR, relayOnMs);
     EEPROM.commit();
 }
 
 void loadRelayOnFromEEPROM()
 {
-    EEPROM.get(EEPROM__RELAY_ON_ADDR, MAX_RELAY_ON);
-    if (MAX_RELAY_ON == 0xFFFFFFFF)
-    { // Uninitialized EEPROM
-        MAX_RELAY_ON = 10000;
-        saveMaxRelayOnToEEPROM(MAX_RELAY_ON);
+    EEPROM.get(EEPROM_RELAY_ON_ADDR, relayOnMs);
+    if (relayOnMs == 0xFFFFFFFF)
+    {
+        relayOnMs = 12000;
+        saveRelayOnToEEPROM();
     }
 }
 
@@ -61,17 +70,20 @@ void handleRoot()
                   "<p>"
                   "<form action='/set_interval' method='POST'>"
                   "<input type='number' name='interval' min='1000' step='1000' value='" +
-                  String(INTERVAL) + "'>"
-                                     "<input type='submit' value='Set Interval'>"
-                                     "</form>"
-                                     "<h2>Set Max Relay on (ms)</h2>"
-                                     "<p>"
-                                     "<form action='/set_relay_on' method='POST'>"
-                                     "<input type='number' name='relay_on' min='500' step='1000' value='" +
-                  String(MAX_RELAY_ON) + "'>"
-                                         "<input type='submit' value='Set Max Relay On'>"
-                                         "</form>"
-                                         "</body></html>";
+                  String(intervalMs) + "'>"
+                                       "<input type='submit' value='Set Interval'>"
+                                       "</form>"
+                                       "</p>"
+                                       "<p>"
+                                       "<h2>Set Max Relay on (ms)</h2>"
+                                       "<p>"
+                                       "<form action='/set_relay_on' method='POST'>"
+                                       "<input type='number' name='relay_on' min='500' step='10' value='" +
+                  String(relayOnMs) + "'>"
+                                      "<input type='submit' value='Set Relay On'>"
+                                      "</form>"
+                                      "</p>"
+                                      "</body></html>";
     server.send(200, "text/html", html);
 }
 
@@ -79,8 +91,8 @@ void handleSetInterval()
 {
     if (server.hasArg("interval"))
     {
-        INTERVAL = server.arg("interval").toInt();
-        saveIntervalToEEPROM(INTERVAL);
+        intervalMs = server.arg("interval").toInt();
+        saveIntervalToEEPROM();
     }
     server.send(200, "text/html", "<html><body><h2>Interval updated!</h2><a href='/'>Go Back</a></body></html>");
 }
@@ -89,10 +101,42 @@ void handleSetRelayOn()
 {
     if (server.hasArg("relay_on"))
     {
-        MAX_RELAY_ON = server.arg("relay_on").toInt();
-        saveIntervalToEEPROM(MAX_RELAY_ON);
+        relayOnMs = server.arg("relay_on").toInt();
+        saveRelayOnToEEPROM();
     }
     server.send(200, "text/html", "<html><body><h2>Relay On updated!</h2><a href='/'>Go Back</a></body></html>");
+}
+
+void handleInfo()
+{
+    int potValue = analogRead(POT_PIN);
+    int delta = map(potValue, 0, 1023, -2000, 2000);
+    unsigned long currentMillis = millis();
+
+    server.send(200, "text/html",
+                "<html><body>"
+                "<table border='1'>"
+                "<tr><th>Parameter</th><th>Value</th></tr>"
+                "<tr><td>relayOn</td><td>" +
+                    String(relayOn) + "</td></tr>"
+                                      "<tr><td>currentMillis</td><td>" +
+                    String(currentMillis) + "</td></tr>"
+                                            "<tr><td>relayStartMillis</td><td>" +
+                    String(relayStartMillis) + "</td></tr>"
+                                               "<tr><td>intervalMs</td><td>" +
+                    String(intervalMs) + "</td></tr>"
+                                         "<tr><td>relayOnTime</td><td>" +
+                    String(relayOnTime) + "</td></tr>"
+                                          "<tr><td>relayOnMs</td><td>" +
+                    String(relayOnMs) + "</td></tr>"
+                                        "<tr><td>delta</td><td>" +
+                    String(delta) + "</td></tr>"
+                                    "<tr><td>Button</td><td>" +
+                    String(digitalRead(BUTTON_PIN)) + "</td></tr>"
+                                                      "<tr><td>currentMillis - relayStartMillis</td><td>" +
+                    String(currentMillis - relayStartMillis) + "</td></tr>"
+                                                               "</table>"
+                                                               "</body></html>");
 }
 
 void setup()
@@ -100,9 +144,10 @@ void setup()
     Serial.begin(9600);
     pinMode(RELAY_PIN, OUTPUT);
     pinMode(BUTTON_PIN, INPUT_PULLUP);
-    digitalWrite(RELAY_PIN, LOW); // Ensure relay is off at start
+    digitalWrite(RELAY_PIN, LOW);
 
     EEPROM.begin(EEPROM_SIZE);
+    // clearEEPROM();
     loadIntervalFromEEPROM();
     loadRelayOnFromEEPROM();
 
@@ -112,35 +157,34 @@ void setup()
     // OTA Setup
     ArduinoOTA.setHostname("D1Mini-Relay");
     ArduinoOTA.begin();
+
     // Start web server
     server.on("/", handleRoot);
     server.on("/set_interval", HTTP_POST, handleSetInterval);
     server.on("/set_relay_on", HTTP_POST, handleSetRelayOn);
+    server.on("/info", HTTP_GET, handleInfo);
     server.begin();
     Serial.println("Web server started");
 }
 
 void loop()
 {
-    ArduinoOTA.handle();   // Handle OTA updates
-    server.handleClient(); // Handle web requests
+    ArduinoOTA.handle();
+    server.handleClient();
     unsigned long currentMillis = millis();
 
-    if ((!relayOn && (currentMillis - previousMillis >= INTERVAL)) || digitalRead(BUTTON_PIN) == LOW)
+    if (!relayOn && ((currentMillis - relayStartMillis >= intervalMs) || digitalRead(BUTTON_PIN) == LOW))
     {
-        previousMillis = currentMillis;
+        relayStartMillis = currentMillis;
 
-        // Read potentiometer value (0 - 1023)
         int potValue = analogRead(POT_PIN);
-        relayOnTime = map(potValue, 0, 1023, 500, 10000);
+        int delta = map(potValue, 0, 1023, -2000, 2000);
+        relayOnTime = constrain(relayOnMs + delta, 500, 60000);
 
-        // Turn relay ON
         digitalWrite(RELAY_PIN, HIGH);
         relayOn = true;
-        relayStartMillis = currentMillis;
     }
 
-    // Turn relay OFF after relayOnTime has passed
     if (relayOn && (currentMillis - relayStartMillis >= relayOnTime))
     {
         digitalWrite(RELAY_PIN, LOW);
